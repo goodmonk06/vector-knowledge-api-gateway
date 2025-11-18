@@ -7,6 +7,8 @@ import { QueryRouter } from './core/queryRouter';
 import { StoreFactory } from './utils/storeFactory';
 import { appRouter } from './api';
 import { Context } from './api/trpc';
+import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { requestLogger } from './middleware/requestLogger';
 
 /**
  * APIゲートウェイサーバーのメイン実装
@@ -54,6 +56,7 @@ async function startServer() {
   // ミドルウェア
   app.use(cors());
   app.use(express.json());
+  app.use(requestLogger);
 
   // ヘルスチェックエンドポイント (tRPC外)
   app.get('/health', async (req, res) => {
@@ -94,10 +97,24 @@ async function startServer() {
       endpoints: {
         health: '/health',
         trpc: '/trpc',
+        documents: {
+          create: 'POST /trpc/documents.create',
+          list: 'GET /trpc/documents.list',
+          get: 'GET /trpc/documents.get',
+          update: 'POST /trpc/documents.update',
+          delete: 'POST /trpc/documents.delete',
+          search: 'GET /trpc/documents.search',
+        },
       },
       availableStores: registry.getStoreNames(),
     });
   });
+
+  // 404 handler
+  app.use(notFoundHandler);
+
+  // Error handler (must be last)
+  app.use(errorHandler);
 
   // サーバー起動
   const server = app.listen(config.port, () => {

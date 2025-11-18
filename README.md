@@ -1,284 +1,376 @@
-# vector-knowledge-api-gateway
+# Vector Knowledge API Gateway
 
-社内の複数ベクトルDBをまとめて検索できるAPIゲートウェイ。検索・RAG・ツール呼び出し用の統一エンドポイントを提供。
+社内の複数ベクトルDBをまとめて検索できるAPIゲートウェイ。RAG（Retrieval-Augmented Generation）システム構築のための統一エンドポイントを提供します。
+
+## Overview
+
+このプロジェクトは、複数のベクトルデータベース（pgvector、Qdrant、OpenAI Vector Store）を抽象化し、統一されたインターフェースで検索できるAPIゲートウェイです。LLMアプリケーションやセマンティック検索システムの基盤として利用できます。
+
+**主な特徴:**
+- 🔍 統一された検索API（単一・マルチストア対応）
+- 📚 完全なCRUD機能を持つ文書管理システム
+- 🤖 RAG用のプロンプト自動生成
+- 🔒 型安全なAPI（tRPC）
+- 🐳 Docker対応で簡単セットアップ
+- ✅ 包括的なテストカバレッジ
 
 ## Tech Stack
 
-- **Backend**: Node.js, TypeScript, Express
-- **API**: tRPC (型安全なRPC)
-- **Vector Stores**: pgvector (PostgreSQL), Qdrant, OpenAI Vector Store
-- **Embeddings**: OpenAI Embeddings API
+| Category | Technology |
+|----------|-----------|
+| **Runtime** | Node.js 20+ |
+| **Language** | TypeScript |
+| **API Framework** | tRPC 10.x |
+| **Web Framework** | Express |
+| **Database** | PostgreSQL 16 with pgvector |
+| **Vector Stores** | pgvector, Qdrant, OpenAI Vector Store |
+| **Embeddings** | OpenAI Embeddings API |
+| **Testing** | Vitest |
+| **Linting** | ESLint, Prettier |
+| **Containerization** | Docker, Docker Compose |
 
-## Features
+## Domain Model
 
-- ✅ 複数ベクトルストアの統一インターフェース
-- ✅ 単一ストア検索 & マルチストア並列検索
-- ✅ RAG用プロンプト自動生成
-- ✅ ヘルスチェック & モニタリング
-- ✅ 型安全なAPI (tRPC)
+### Core Entities
+
+**Document**
+```typescript
+{
+  id: number;              // Primary key
+  title: string;           // Document title (max 500 chars)
+  content: string;         // Full text content
+  embedding: vector(1536); // OpenAI embedding vector
+  metadata: JSONB;         // Flexible metadata
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
+
+**Vector Search Result**
+```typescript
+{
+  id: string;
+  score: number;           // Similarity score (0-1)
+  content: string;
+  metadata: Record<string, any>;
+  storeName: string;       // Source store identifier
+}
+```
+
+### Relationships
+
+```
+┌─────────────────┐
+│   API Gateway   │
+└────────┬────────┘
+         │
+    ┌────┴────┬─────────┬──────────┐
+    │         │         │          │
+┌───▼───┐ ┌──▼───┐ ┌───▼────┐ ┌───▼────┐
+│pgvector│ │Qdrant│ │OpenAI │ │[Future]│
+└────────┘ └──────┘ └────────┘ └────────┘
+```
 
 ## Architecture
 
 ```
 src/
-├── core/           # ベクトルストアの抽象化層
-│   ├── types.ts
-│   ├── vectorStore.ts
+├── api/                    # tRPC API layer
+│   ├── index.ts           # Main router
+│   ├── trpc.ts            # tRPC setup
+│   └── routers/
+│       ├── documentRouter.ts   # Document CRUD
+│       ├── vectorRouter.ts     # Vector search
+│       └── healthRouter.ts     # Health checks
+├── core/                   # Core abstractions
+│   ├── types.ts           # Type definitions
+│   ├── vectorStore.ts     # IVectorStore interface
 │   ├── vectorStoreRegistry.ts
-│   └── queryRouter.ts
-├── stores/         # 各ベクトルストアの実装
+│   └── queryRouter.ts     # Query routing logic
+├── stores/                 # Vector store implementations
 │   ├── pgVectorStore.ts
 │   ├── qdrantStore.ts
 │   └── openaiStore.ts
-├── api/            # tRPC APIルーター
-│   ├── trpc.ts
-│   └── routers/
-│       ├── vectorRouter.ts
-│       └── healthRouter.ts
-├── config/         # 環境変数・設定
-│   └── env.ts
-├── utils/          # RAGフォーマッター等
-│   ├── ragFormatter.ts
-│   └── storeFactory.ts
-└── server.ts       # メインエントリーポイント
+├── services/               # Business logic
+│   └── documentService.ts # Document management
+├── db/                     # Database
+│   ├── schema.sql         # PostgreSQL schema
+│   └── client.ts          # DB connection pool
+├── middleware/             # Express middleware
+│   ├── errorHandler.ts
+│   └── requestLogger.ts
+├── utils/                  # Utilities
+│   ├── ragFormatter.ts    # RAG helpers
+│   └── storeFactory.ts    # Store initialization
+├── config/                 # Configuration
+│   └── env.ts             # Environment variables
+└── server.ts              # Main entry point
 ```
 
 ## Getting Started
 
-### 1. インストール
+### Requirements
 
+- **Node.js**: 20.x or higher
+- **Docker & Docker Compose**: Latest version
+- **OpenAI API Key**: Required for embeddings
+
+### Quick Start
+
+1. **Clone and install dependencies**
 ```bash
+git clone <repository-url>
+cd vector-knowledge-api-gateway
 npm install
 ```
 
-### 2. 環境変数の設定
-
-`.env.example` をコピーして `.env` を作成:
-
+2. **Set up environment variables**
 ```bash
 cp .env.example .env
 ```
 
-`.env` を編集:
-
+Edit `.env` and add your OpenAI API key:
 ```bash
-# サーバー設定
-PORT=3000
-
-# 有効にするストア (カンマ区切り)
-ENABLED_STORES=pgvector,qdrant,openai
-
-# OpenAI API Key (必須)
-OPENAI_API_KEY=sk-your-key-here
-
-# PostgreSQL (pgvector) 設定
-PGVECTOR_HOST=localhost
-PGVECTOR_PORT=5432
-PGVECTOR_DATABASE=vectordb
-PGVECTOR_USER=postgres
-PGVECTOR_PASSWORD=postgres
-
-# Qdrant 設定
-QDRANT_URL=http://localhost:6333
-QDRANT_API_KEY=
-
-# デフォルト設定
-DEFAULT_EMBEDDING_MODEL=text-embedding-3-small
-DEFAULT_TOP_K=5
+OPENAI_API_KEY=sk-your-actual-key-here
 ```
 
-### 3. 起動
-
+3. **Start with Docker (Recommended)**
 ```bash
-# 開発モード
-npm run dev
+# Start all services (PostgreSQL + API)
+npm run docker:up
 
-# ビルド
-npm run build
-
-# 本番モード
-npm start
+# Wait for services to be healthy (about 10 seconds)
+# Check logs
+npm run docker:logs
 ```
 
-サーバーが起動したら `http://localhost:3000` にアクセス。
-
-## API Usage
-
-### Health Check
-
+4. **Initialize database and seed data**
 ```bash
+# Run migrations
+npm run db:migrate
+
+# Seed sample documents
+npm run db:seed
+```
+
+5. **Access the API**
+```bash
+# API is now running at http://localhost:3000
+
+# Check health
 curl http://localhost:3000/health
+
+# View API info
+curl http://localhost:3000
 ```
 
-### tRPC Endpoints
+### Alternative: Local Development (without Docker)
 
-#### 1. 単一ストア検索
+If you want to run locally without Docker:
 
-```typescript
-// tRPCクライアントから
-const result = await trpc.vector.searchSingle.query({
-  storeName: 'pgvector',
-  query: 'TypeScriptの使い方',
-  collection: 'documents',
-  topK: 5
-});
-```
-
-REST API経由:
+1. **Start PostgreSQL with pgvector**
 ```bash
-curl -X POST http://localhost:3000/trpc/vector.searchSingle \
+# Using Docker for PostgreSQL only
+docker run -d \
+  --name vector-postgres \
+  -e POSTGRES_DB=vectordb \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -p 5432:5432 \
+  pgvector/pgvector:pg16
+```
+
+2. **Run migrations and seed**
+```bash
+npm run db:migrate
+npm run db:seed
+```
+
+3. **Start dev server**
+```bash
+npm run dev
+```
+
+## Example Vertical Slice: Document Search
+
+This implementation provides a complete end-to-end flow for document management and semantic search.
+
+### 1. Create Documents
+
+```bash
+curl -X POST http://localhost:3000/trpc/documents.create \
   -H "Content-Type: application/json" \
   -d '{
-    "storeName": "pgvector",
-    "query": "TypeScriptの使い方",
-    "topK": 5
+    "title": "Introduction to Vector Databases",
+    "content": "Vector databases store high-dimensional vectors for similarity search...",
+    "metadata": {
+      "category": "technology",
+      "tags": ["vector-db", "ai"]
+    }
   }'
 ```
 
-#### 2. マルチストア検索
+### 2. List All Documents
 
-全ストアから並列検索し、上位k件をマージ:
-
-```typescript
-const result = await trpc.vector.searchMulti.query({
-  query: 'ベクトルDBの比較',
-  topK: 10
-});
-
-// レスポンス
-{
-  results: [
-    {
-      id: "doc-123",
-      score: 0.92,
-      content: "...",
-      storeName: "pgvector",
-      metadata: {...}
-    },
-    ...
-  ],
-  count: 10,
-  sources: ["pgvector", "qdrant", "openai"]
-}
+```bash
+curl 'http://localhost:3000/trpc/documents.list?input={"json":{"limit":10,"offset":0}}'
 ```
 
-#### 3. RAG用コンテキスト取得
+### 3. Search by Semantic Similarity
 
-検索結果をプロンプト形式で整形:
-
-```typescript
-const result = await trpc.vector.getRagContext.query({
-  query: 'RAGシステムの実装方法',
-  topK: 5,
-  maxContextLength: 4000,
-  includeMetadata: true
-});
-
-// レスポンス
-{
-  context: "...",      // フォーマット済みコンテキスト
-  prompt: "...",       // LLMに渡す完全なプロンプト
-  results: [...],      // 元の検索結果
-  metadata: {
-    resultCount: 5,
-    sources: ["pgvector", "qdrant"]
-  }
-}
+```bash
+curl 'http://localhost:3000/trpc/documents.search?input={"json":{"query":"How do vector databases work?","limit":5}}'
 ```
 
-#### 4. 特定ストアリストに検索
+### 4. Get RAG Context
 
-```typescript
-const result = await trpc.vector.searchStores.query({
-  storeNames: ['pgvector', 'qdrant'],  // openaiを除外
-  query: '検索クエリ',
-  topK: 5
-});
+```bash
+curl 'http://localhost:3000/trpc/vector.getRagContext?input={"json":{"query":"Explain vector search","topK":3}}'
 ```
 
-### LLMからの呼び出し例
+**Response includes:**
+- `context`: Formatted context string
+- `prompt`: Complete prompt for LLM
+- `results`: Raw search results
+- `metadata`: Summary statistics
 
-```python
-import requests
+## API Reference
 
-# RAGコンテキストを取得
-response = requests.post('http://localhost:3000/trpc/vector.getRagContext', json={
-    'query': 'ユーザーからの質問',
-    'topK': 5
-})
+### Documents API
 
-data = response.json()
-prompt = data['prompt']
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/trpc/documents.create` | POST | Create new document with auto-embedding |
+| `/trpc/documents.get` | GET | Get document by ID |
+| `/trpc/documents.list` | GET | List documents with pagination |
+| `/trpc/documents.update` | POST | Update document (re-embeds if content changes) |
+| `/trpc/documents.delete` | POST | Delete document |
+| `/trpc/documents.search` | GET | Semantic search using vector similarity |
 
-# LLMに送信
-llm_response = openai.chat.completions.create(
-    model='gpt-4',
-    messages=[
-        {'role': 'user', 'content': prompt}
-    ]
-)
+### Vector Search API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/trpc/vector.searchSingle` | GET | Search single store |
+| `/trpc/vector.searchMulti` | GET | Search all stores, merge results |
+| `/trpc/vector.searchStores` | GET | Search specific stores |
+| `/trpc/vector.getRagContext` | GET | Get formatted RAG prompt |
+
+### Health API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Overall health status |
+| `/trpc/health.check` | GET | Detailed store health |
+| `/trpc/health.stores` | GET | List available stores |
+| `/trpc/health.ping` | GET | Simple ping |
+
+## Development Scripts
+
+```bash
+# Development
+npm run dev              # Start dev server with hot reload
+npm run build            # Build TypeScript to dist/
+npm start                # Start production server
+
+# Database
+npm run db:migrate       # Run database migrations
+npm run db:seed          # Seed sample data
+npm run db:setup         # Migrate + Seed
+
+# Docker
+npm run docker:up        # Start all services
+npm run docker:down      # Stop all services
+npm run docker:logs      # View app logs
+npm run docker:rebuild   # Rebuild and restart
+
+# Testing & Quality
+npm test                 # Run tests
+npm run test:watch       # Watch mode
+npm run test:coverage    # Coverage report
+npm run lint             # Lint code
+npm run lint:fix         # Fix lint issues
+npm run format           # Format with Prettier
+npm run typecheck        # TypeScript type checking
 ```
 
-## RAG Formatter
+## Testing
 
-検索結果のフォーマットユーティリティ:
+Run the test suite:
 
-```typescript
-import { RAGFormatter } from './utils/ragFormatter';
+```bash
+# Run all tests
+npm test
 
-// プロンプト生成
-const prompt = RAGFormatter.formatPrompt(results, {
-  userQuery: '質問文',
-  maxContextLength: 4000,
-  includeMetadata: true
-});
+# Watch mode
+npm run test:watch
 
-// Markdown形式
-const markdown = RAGFormatter.formatMarkdown(results);
-
-// ツール呼び出し用JSON
-const toolFormat = RAGFormatter.formatForTool(results);
+# With coverage
+npm run test:coverage
 ```
 
-## Adding New Vector Stores
+**Test Coverage Areas:**
+- ✅ Core query routing logic
+- ✅ RAG formatter utilities
+- ✅ Vector store abstractions
+- ✅ Document service (integration tests require DB)
 
-新しいベクトルストアを追加するには:
+## Configuration
 
-1. `src/stores/` に新しいストアクラスを作成
-2. `IVectorStore` インターフェースを実装
-3. `src/utils/storeFactory.ts` にファクトリーロジックを追加
-4. 環境変数に設定を追加
+### Environment Variables
 
-```typescript
-import { VectorStore } from '../core/vectorStore';
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PORT` | No | 3000 | Server port |
+| `NODE_ENV` | No | development | Environment |
+| `ENABLED_STORES` | No | pgvector | Active stores (comma-separated) |
+| `OPENAI_API_KEY` | **Yes** | - | OpenAI API key for embeddings |
+| `DEFAULT_EMBEDDING_MODEL` | No | text-embedding-3-small | Embedding model |
+| `PGVECTOR_HOST` | No | localhost | PostgreSQL host |
+| `PGVECTOR_PORT` | No | 5432 | PostgreSQL port |
+| `PGVECTOR_DATABASE` | No | vectordb | Database name |
+| `PGVECTOR_USER` | No | postgres | Database user |
+| `PGVECTOR_PASSWORD` | No | postgres | Database password |
+| `QDRANT_URL` | No | http://localhost:6333 | Qdrant URL |
+| `QDRANT_API_KEY` | No | - | Qdrant API key |
+| `DEFAULT_TOP_K` | No | 5 | Default search results |
 
-export class MyCustomStore extends VectorStore {
-  constructor(config: {...}) {
-    super('my-custom-store');
-  }
+### Demo Credentials
 
-  async initialize(): Promise<void> {
-    // 初期化処理
-  }
+The seeded database includes 8 sample documents covering:
+- Vector databases
+- RAG systems
+- TypeScript & tRPC
+- PostgreSQL pgvector
+- Semantic search
+- Docker
+- OpenAI Embeddings
 
-  async search(query: VectorSearchQuery): Promise<VectorSearchResult[]> {
-    // 検索実装
-  }
+**Access:**
+- Base URL: http://localhost:3000
+- Health: http://localhost:3000/health
+- API Docs: http://localhost:3000 (JSON response with all endpoints)
 
-  async healthCheck(): Promise<StoreHealth> {
-    // ヘルスチェック
-  }
-}
+**Demo Query:**
+```bash
+curl 'http://localhost:3000/trpc/documents.search?input={"json":{"query":"How to build RAG systems?","limit":3}}'
 ```
 
-## Monitoring
+## Monitoring & Observability
 
-ヘルスチェックエンドポイントで各ストアの状態を確認:
+### Health Checks
 
+**Simple health check:**
 ```bash
 curl http://localhost:3000/health
 ```
 
+**Detailed health with store status:**
+```bash
+curl 'http://localhost:3000/trpc/health.check'
+```
+
+**Response format:**
 ```json
 {
   "status": "healthy",
@@ -287,17 +379,167 @@ curl http://localhost:3000/health
     {
       "storeName": "pgvector",
       "status": "healthy",
-      "latency": 45
-    },
-    {
-      "storeName": "qdrant",
-      "status": "healthy",
       "latency": 23
     }
   ]
 }
 ```
 
+### Logging
+
+The application logs all requests with:
+- HTTP method and path
+- Status code
+- Response time
+- Error details (if any)
+
+**Example log:**
+```
+✓ [INFO] GET /health - 200 (15ms)
+✓ [INFO] POST /trpc/documents.create - 200 (234ms)
+❌ [ERROR] GET /trpc/documents.get - 404 (5ms)
+```
+
+## Adding New Vector Stores
+
+To add support for a new vector database:
+
+1. **Create store implementation** in `src/stores/`:
+
+```typescript
+import { VectorStore } from '../core/vectorStore';
+
+export class MyNewStore extends VectorStore {
+  constructor(config: MyStoreConfig) {
+    super('my-new-store');
+  }
+
+  async initialize(): Promise<void> {
+    // Connect to your store
+  }
+
+  async search(query: VectorSearchQuery): Promise<VectorSearchResult[]> {
+    // Implement search logic
+  }
+
+  async healthCheck(): Promise<StoreHealth> {
+    // Check store availability
+  }
+}
+```
+
+2. **Update store factory** in `src/utils/storeFactory.ts`:
+
+```typescript
+case 'my-new-store':
+  return new MyNewStore({
+    url: config.myNewStore.url,
+    apiKey: config.myNewStore.apiKey,
+  });
+```
+
+3. **Add config** in `src/config/env.ts`:
+
+```typescript
+myNewStore: {
+  url: process.env.MY_NEW_STORE_URL,
+  apiKey: process.env.MY_NEW_STORE_API_KEY,
+}
+```
+
+4. **Enable in `.env`:**
+```bash
+ENABLED_STORES=pgvector,my-new-store
+MY_NEW_STORE_URL=http://localhost:8080
+```
+
+## Future Extensions
+
+Planned enhancements for future releases:
+
+- [ ] **Authentication & Authorization**: API key management, role-based access
+- [ ] **Advanced RAG Features**:
+  - Hybrid search (dense + sparse)
+  - Re-ranking models
+  - Multi-hop retrieval
+- [ ] **Additional Vector Stores**:
+  - Pinecone
+  - Weaviate
+  - Milvus
+  - Chroma
+- [ ] **Enhanced Observability**:
+  - Structured logging (Winston/Pino)
+  - Metrics (Prometheus)
+  - Distributed tracing (OpenTelemetry)
+- [ ] **Performance Optimizations**:
+  - Caching layer (Redis)
+  - Batch embedding operations
+  - Query result caching
+- [ ] **Admin UI**: Web dashboard for document management
+- [ ] **Multi-tenancy**: Isolated collections per tenant
+- [ ] **Advanced Search**:
+  - Filtered search
+  - Date range queries
+  - Faceted search
+- [ ] **Data Management**:
+  - Bulk import/export
+  - Document versioning
+  - Soft deletes
+
+## Troubleshooting
+
+### Database Connection Issues
+
+**Problem**: `Failed to connect to database`
+
+**Solution**:
+```bash
+# Check if PostgreSQL is running
+docker ps | grep postgres
+
+# Check logs
+docker logs vector-gateway-postgres
+
+# Verify connection
+docker exec -it vector-gateway-postgres psql -U postgres -d vectordb -c "SELECT 1"
+```
+
+### OpenAI API Errors
+
+**Problem**: `Invalid API key`
+
+**Solution**:
+- Verify your API key in `.env`
+- Check OpenAI account status
+- Ensure sufficient credits
+
+**Problem**: `Rate limit exceeded`
+
+**Solution**:
+- Implement request throttling
+- Consider caching embeddings
+- Upgrade OpenAI plan
+
+### Docker Issues
+
+**Problem**: Containers won't start
+
+**Solution**:
+```bash
+# Clean up and rebuild
+npm run docker:down
+docker system prune -a
+npm run docker:rebuild
+```
+
+## Contributing
+
+This is an internal project. For questions or issues, contact the maintainers.
+
 ## License
 
 MIT
+
+---
+
+**Built with ❤️ using TypeScript, tRPC, and pgvector**
